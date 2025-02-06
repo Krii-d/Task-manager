@@ -34,4 +34,9 @@ const generateToken = (userData) => {
   return jwt.sign(userData, process.env.JWT_SECRET, { expiresIn: 3000 });
 };
 
-module.exports = { authMiddleware, generateToken };
+// Function to generate a random OTP
+const generateOTP = () => {
+  return Math.floor(100000 + Math.random() * 900000);
+};
+
+module.exports = { authMiddleware, generateToken, generateOTP };
