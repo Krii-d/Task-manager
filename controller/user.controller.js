@@ -1,11 +1,13 @@
 const bcrypt = require("bcryptjs");
 const prisma = require("../prisma/prisma.client");
-const jwt = require("jsonwebtoken");
-const { generateToken } = require("../middleware/auth.middleware");
-const { genericUploadFiles } = require("../utils/imageUpload");
-const fs = require("fs/promises");
 
+const fs = require("fs/promises");
 const path = require("path");
+
+const { generateToken, generateOTP } = require("../middleware/auth.middleware");
+const { genericUploadFiles } = require("../utils/imageUpload");
+const { sendEmail } = require("../utils/sendMail");
+
 const register = async (req, res) => {
   try {
     const { name, username, password, email, phone_no } = req.body;
@@ -44,22 +46,78 @@ const register = async (req, res) => {
       },
     });
 
-    const payLoad = {
-      id: newUser.id,
-      username: newUser.username,
-      email: newUser.email,
-    };
+    console.log(newUser);
 
-    // Generate a JWT token for the user
-    const token = generateToken(payLoad);
+    const expectedOTP = generateOTP().toString();
+    const currentDate = new Date();
+    currentDate.setMinutes(currentDate.getMinutes() + 30);
+    const formattedExpiryDate = currentDate.toISOString();
 
-    res.status(201).json({
-      messgae: "user created successfully",
-      token,
+    const otp = await prisma.oTP.create({
+      data: {
+        user_id: newUser.id,
+        code: expectedOTP,
+        expiresAt: formattedExpiryDate,
+      },
     });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Something went wrong." });
+    console.log("otp", otp);
+    console.log("user email", newUser.email);
+
+    await sendEmail({
+      to: newUser.email,
+      subject: "Your OTP for Login",
+      text: `Your OTP for login is ${expectedOTP}`,
+    });
+    console.log(`Your OTP for login is ${expectedOTP}`);
+    res.status(200).json({
+      data: {
+        user: newUser,
+      },
+      message: "OTP sent to your email address. Please check your inbox.",
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Error creating user");
+  }
+};
+
+const checkOtp = async (req, res) => {
+  const { otp, id } = req.body;
+  try {
+    const userOtp = await prisma.oTP.findFirst({
+      where: {
+        user_id: id,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+    if (!userOtp) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    console.log("user:", userOtp);
+    if (parseInt(otp) !== parseInt(userOtp.code)) {
+      return res.status(400).json({
+        message: "Invalid OTP",
+      });
+    }
+    await prisma.user.update({
+      where: {
+        id: userOtp.user_id,
+      },
+      data: {
+        isVerified: true,
+      },
+    });
+    res.status(200).json({
+      message: "OTP verified",
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Internal server error"); // Respond with an error status
   }
 };
 
@@ -81,8 +139,11 @@ const login = async (req, res) => {
       },
     });
 
+    // Check if user exists
     if (!user) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      return res.status(401).json({
+        message: "Invalid Credentials",
+      });
     }
 
     //Compare the provided password with hashed password in the database
@@ -90,6 +151,15 @@ const login = async (req, res) => {
 
     if (!isPasswordValid) {
       return res.status(401).json({ error: "Invalid password" });
+    }
+
+    if (!user.isVerified) {
+      delete user.password;
+
+      return res.status(403).json({
+        message: "Account is not verified",
+        data: { user: user },
+      });
     }
 
     // create a payload for the JWT token
@@ -204,4 +274,4 @@ const deleteAvatar = async (req, res) => {
   }
 };
 
-module.exports = { register, login, uploadAvatar, deleteAvatar };
+module.exports = { register, login, uploadAvatar, deleteAvatar, checkOtp };
