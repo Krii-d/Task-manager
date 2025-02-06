@@ -1,35 +1,37 @@
-const prisma = require("../prisma/prisma.client");
+const jwt = require("jsonwebtoken");
 
-const createTask = async(req,res) => {
-try{
-    const {title , description , due_date , priority} = req.body ; 
-    const user_id = req.user.id; // Get user ID from auth middleware
+const authMiddleware = (req, res, next) => {
+  // Checking if token exists in header or not
+  const authorization = req.headers.authorization;
+  if (!authorization) {
+    return res.status(401).json({ message: "token not found" });
+  }
+  // extract jwt token from the  user header
+  const token = req.headers.authorization.split(" ")[1];
 
-    //validate 
-    if(!title|| !description || !due_date || !priority ) {
-        return res.status(400) .json({
-            message : 'All fields are required'
-        })
-    }
+  if (!token) {
+    return res.status(401).json({ message: "unauthorized" });
+  }
+  try {
+    // verify the token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    // console.log(decoded);
 
-    //create task
-    const newTask = await prisma.task.create({
-        data: {
-            title,
-            description,
-            due_date,
-            priority,
-            user_id
+    // attach user info to payload
+    req.user = decoded;
+    console.log(req.user);
 
-        }
-    })
-
-    res.status(201) . json(newTask);
- }
- catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Something went wrong." });
+    next();
+  } catch (err) {
+    console.log(err);
+    return res.status(401).json({ message: "Invalid token" });
   }
 };
 
-module.exports = {createTask};
+// Function to generate token
+const generateToken = (userData) => {
+  // Generate new jwt token using user data
+  return jwt.sign(userData, process.env.JWT_SECRET, { expiresIn: 3000 });
+};
+
+module.exports = { authMiddleware, generateToken };

@@ -22,6 +22,7 @@ model User {
   phone_no   String?      // Nullable field
   created_at DateTime  @default(now())
   updated_at DateTime  @updatedAt
+  avatar     String?
 
   // Relations
   tasks      Task[]
@@ -39,8 +40,8 @@ model Task {
   id          String    @id @default(uuid())
   title       String
   description String?
-  due_date    Int
-  priority     Priority  @default(MEDIUM)
+  due_date    DateTime
+  priority    Priority  @default(MEDIUM)
   status      Boolean  @default(false)
   created_at  DateTime  @default(now())
   updated_at  DateTime  @updatedAt
