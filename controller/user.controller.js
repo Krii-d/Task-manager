@@ -1,5 +1,6 @@
 const bcrypt = require("bcryptjs");
 const prisma = require("../prisma/prisma.client");
+const jwt = require("jsonwebtoken");
 
 const fs = require("fs/promises");
 const path = require("path");
@@ -85,12 +86,8 @@ const checkOtp = async (req, res) => {
   const { otp, id } = req.body;
   try {
     const userOtp = await prisma.oTP.findFirst({
-      where: {
-        user_id: id,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
+      where: { user_id: id },
+      orderBy: { createdAt: "desc" },
     });
     if (!userOtp) {
       return res.status(404).json({
@@ -274,4 +271,122 @@ const deleteAvatar = async (req, res) => {
   }
 };
 
-module.exports = { register, login, uploadAvatar, deleteAvatar, checkOtp };
+const forgotPassword = async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    // Check if user exists
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    // create a payload for the JWT token
+    const payload = {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+    };
+    // Generate JWT token for reset link
+    const resetToken = generateToken(payload); // Token valid for 3 minutes
+
+    // Create reset link
+    const resetLink = `https://yourfrontend.com/reset-password?token=${resetToken}`;
+
+    // Send email with reset link
+    sendEmail({
+      to: email,
+      subject: "Password Reset Request",
+      text: `Click the link to reset your password: ${resetLink}`,
+    });
+
+    return res.json({ message: "Password reset link sent to your email" });
+  } catch (error) {
+    console.error("Error forgotPassword:", error);
+    return res.status(500).json({ message: "Something went wrong", error });
+  }
+};
+
+const resetPassword = async (req, res) => {
+  const { token, password } = req.body;
+  try {
+    // Verify JWT token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (!decoded) return res.status(400).json({ message: "Invalid token" });
+
+    const user = await prisma.user.findFirst({
+      where: {
+        id: decoded.id,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    await prisma.user.update({
+      where: {
+        id: user.id,
+      },
+      data: {
+        password: hashedPassword,
+      },
+    });
+
+    return res.json({ message: "Password reset successfully" });
+  } catch (err) {
+    console.log(" error during password reset", err);
+    return res.status(500).json({ message: "Something went wrong", error });
+  }
+};
+
+const changePassword = async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  const userId = req.user.id;
+  try {
+    const user = await prisma.user.findFirst({
+      where: {
+        id: userId,
+      },
+    });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const isPasswordValid = await bcrypt.compare(
+      currentPassword,
+      user.password
+    );
+
+    if (!isPasswordValid) {
+      return res.status(401).json({ message: "Invalid current password" });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await prisma.user.update({
+      where: {
+        id: userId,
+      },
+      data: {
+        password: hashedPassword,
+      },
+    });
+
+    return res.json({ message: "Password changed successfully" });
+  } catch (err) {
+    console.error("Error changing password:", err);
+    return res.status(500).json({ message: "Something went wrong", err });
+  }
+};
+
+module.exports = {
+  register,
+  login,
+  uploadAvatar,
+  deleteAvatar,
+  checkOtp,
+  forgotPassword,
+  resetPassword,
+  changePassword,
+};
